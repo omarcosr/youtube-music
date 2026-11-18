@@ -18,38 +18,51 @@ on:
 permissions:
   contents: write
 
+# One release at a time per ref; a newer push of the same ref cancels the older run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       TARVE_UPDATE_PRIVATE_KEY: ${{ secrets.TARVE_UPDATE_PRIVATE_KEY }}
       GH_TOKEN: ${{ github.token }}
+      # The Go app's native library, built once per Tarve native source (below) and cached.
+      TARVE_GO_NATIVE: ${{ github.workspace }}\native-cache\tarve_native.dll
     steps:
       # go/go.mod builds against ../../tarve/go: the two repositories side by side.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: youtube-music
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: omarcosr/tarve
           ref: ${{ inputs.tarve-ref || 'main' }}
           path: tarve
 
+      # The release build of the native library (fat LTO) is most of the run: reuse it while
+      # Tarve's native sources stay the same, and skip Rust altogether.
+      - name: Cache the Tarve native library
+        id: native
+        uses: actions/cache@v4
+        with:
+          path: native-cache
+          key: tarve-native-${{ runner.os }}-${{ hashFiles('tarve/native/**', 'tarve/scripts/build.ts', 'tarve/scripts/native.ts') }}
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.4"
       # tarve build --runtime node packs the Node.js on PATH (26.10+ for node:ffi in a SEA).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "26"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: youtube-music/go/go.mod
           cache-dependency-path: youtube-music/go/go.sum
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: tarve/native
 
       - name: Install txiki.js
         shell: pwsh
@@ -60,11 +73,23 @@ jobs:
           "TARVE_TXIKI=$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe" >> $env:GITHUB_ENV
 
       - name: Install dependencies
+        working-directory: youtube-music
+        run: bun install --frozen-lockfile
+
+      - name: Setup Rust
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Cargo
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tarve/native
+      - name: Build the Tarve native library
+        if: steps.native.outputs.cache-hit != 'true'
+        working-directory: tarve
         run: |
-          cd tarve
           bun install --frozen-lockfile
-          cd ../youtube-music
-          bun install --frozen-lockfile
+          bun scripts/build.ts --release --outfile "$env:TARVE_GO_NATIVE"
 
       - name: Check the tag matches package.json
         if: github.event_name == 'push'
