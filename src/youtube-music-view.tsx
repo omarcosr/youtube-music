@@ -7,8 +7,9 @@ export { clock };
 export const AUDIO_ID = "ytm-audio";
 /** Where the song is, set by `<audio time>` several times a second without a render. */
 export const playTime = signal(0);
-/** `playTime` as the player bar's clock (youtube-music-actions.ts keeps it in step). */
+/** `playTime` as the player bar's clock, in step with every change (playback, seeking, a restored session). */
 export const clockText = signal(clock(0));
+playTime.subscribe(() => { clockText.value = clock(playTime.value); });
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
 

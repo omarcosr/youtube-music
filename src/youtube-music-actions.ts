@@ -83,7 +83,6 @@ export function connect(app: ReturnType<typeof createApp>): void {
   // when the lyric line being sung changes (the line it highlights).
   let shownLine = -1;
   playTime.subscribe(() => {
-    clockText.value = clock(playTime.value);
     state.followLyrics();
     const song = state.queue[state.index];
     const lines = state.page.kind === "playing" && state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;

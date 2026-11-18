@@ -78,7 +78,9 @@ jobs:
           bun run typecheck
           bun test
           cd go
-          go vet .
+          go vet ./...
+          # Includes the parity test: the Go app and src/ must build identical native documents.
+          go test ./...
 
       - name: Build and publish
         working-directory: youtube-music
