@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@tarve/core",
+    "types": [
+      "bun"
+    ],
+    "paths": {
+      "@tarve/core": [
+        "../../../tarve/packages/core/src/index.ts"
+      ],
+      "@tarve/core/jsx-runtime": [
+        "../../../tarve/packages/core/src/jsx-runtime.ts"
+      ],
+      "@tarve/core/jsx-dev-runtime": [
+        "../../../tarve/packages/core/src/jsx-runtime.ts"
+      ],
+      "@tarve/core/*": [
+        "../../../tarve/packages/core/src/*"
+      ],
+      "@tarve/protocol": [
+        "../../../tarve/packages/protocol/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "*.tsx",
+    ".cache"
+  ]
+}

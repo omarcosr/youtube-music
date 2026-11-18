@@ -10,12 +10,13 @@ import { createApp, requestSingleInstance } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
 import { phone } from "./youtube-music-mobile";
 import { restoreSession, saveSession } from "./youtube-music-session";
+import { install, watchUpdates } from "./youtube-music-updates";
 import { YouTubeMusicView, state } from "./youtube-music-view";
 
 // One app per user: closed to the tray, a later launch (Start, the taskbar, a media flyout
 // opening the app by its AppUserModelID) brings this one back instead of starting another
 // player with a second media session.
-const instance = await requestSingleInstance({ id: "omarcosr.YouTubeMusic" });
+const instance = await requestSingleInstance({ id: "YouTubeMusic.Desktop" });
 if (!instance.primary) process.exit(0);
 
 // The queue, song, position, volume and modes of the last run come back, paused.
@@ -42,6 +43,10 @@ if (!phone) {
   state.hide = () => (tray.availability()?.available ? app.hide() : app.minimize());
 }
 const saving = setInterval(saveSession, 5000);
+const stopUpdates = watchUpdates(saveSession);
 await app.closed;
 clearInterval(saving);
+stopUpdates();
 saveSession();
+// A downloaded update replaces this version now and runs on the next launch.
+install();

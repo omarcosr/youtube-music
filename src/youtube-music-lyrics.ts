@@ -47,7 +47,7 @@ async function lrclib(song: Song, signal?: AbortSignal): Promise<LrclibTrack | n
   const artist = song.artist.split(/,| & /)[0]!.trim();
   // A remaster or "feat." suffix is part of YouTube's title, rarely of LRCLIB's.
   const title = song.title.replace(/\s*[([](feat\.?|ft\.|with|from|remaster|\d{4} remaster)[^)\]]*[)\]]/gi, "").trim() || song.title;
-  const headers = { "user-agent": "tarve-youtube-music-example (https://github.com/omarcosr/tarve)" };
+  const headers = { "user-agent": "youtube-music (https://tarve.dev)" };
   const timeout = AbortSignal.timeout(15_000);
   const signals = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const exact = new URLSearchParams({ artist_name: artist, track_name: title });

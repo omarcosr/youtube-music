@@ -1,0 +1,85 @@
+# A pushed tag v<version> (matching package.json) publishes GitHub release v<version> with every
+# Windows download (TypeScript app on txiki.js, Bun and Node.js; Go app) and the signed manifests
+# the installed apps update from (scripts/release.ts).
+#
+# Secret TARVE_UPDATE_PRIVATE_KEY: the contents of youtube-music-update.key:
+#   gh secret set TARVE_UPDATE_PRIVATE_KEY --repo omarcosr/youtube-music < youtube-music-update.key
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tarve-ref:
+        description: Tarve commit, tag or branch the Go app builds against
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TARVE_UPDATE_PRIVATE_KEY: ${{ secrets.TARVE_UPDATE_PRIVATE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # go/go.mod builds against ../../tarve/go: the two repositories side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: youtube-music
+      - uses: actions/checkout@v4
+        with:
+          repository: omarcosr/tarve
+          ref: ${{ inputs.tarve-ref || 'main' }}
+          path: tarve
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      # tarve build --runtime node packs the Node.js on PATH (26.10+ for node:ffi in a SEA).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: youtube-music/go/go.mod
+          cache-dependency-path: youtube-music/go/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tarve/native
+
+      - name: Install txiki.js
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.6.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
+          Expand-Archive "$env:RUNNER_TEMP\txiki.zip" -DestinationPath "$env:RUNNER_TEMP\txiki"
+          "TARVE_TXIKI=$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe" >> $env:GITHUB_ENV
+
+      - name: Install dependencies
+        run: |
+          cd tarve
+          bun install --frozen-lockfile
+          cd ../youtube-music
+          bun install --frozen-lockfile
+
+      - name: Check the tag matches package.json
+        if: github.event_name == 'push'
+        shell: bash
+        working-directory: youtube-music
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - name: Test
+        working-directory: youtube-music
+        run: |
+          bun run typecheck
+          bun test
+          cd go
+          go vet .
+
+      - name: Build and publish
+        working-directory: youtube-music
+        run: bun scripts/release.ts --publish

@@ -9,9 +9,11 @@
     "dev": "bunx tarve dev src/youtube-music.tsx",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bunx tarve build src/youtube-music.tsx --runtime txiki --outfile dist/YouTubeMusic.exe",
-    "build:bun": "bunx tarve build src/youtube-music.tsx --runtime bun --outfile dist/bun/YouTubeMusic.exe",
-    "package": "bun run build && bunx tarve package dist/YouTubeMusic.exe --format setup,zip --out dist/release"
+    "build": "bunx tarve build src/youtube-music.tsx --runtime txiki --packs --key youtube-music-update.key --outfile dist/YouTubeMusic.exe",
+    "build:bun": "bunx tarve build src/youtube-music.tsx --runtime bun --packs --key youtube-music-update.key --outfile dist/bun/YouTubeMusic.exe",
+    "package": "bun run build && bunx tarve package dist/YouTubeMusic.exe --format setup,zip --out dist/release",
+    "release": "bun scripts/release.ts",
+    "release:publish": "bun scripts/release.ts --publish"
   },
   "dependencies": {
     "@tarve/core": "0.13.3"
@@ -22,9 +24,8 @@
   },
   "tarve": {
     "name": "YouTube Music",
-    "appId": "omarcosr.YouTubeMusic",
+    "appId": "YouTubeMusic.Desktop",
     "description": "Cliente do YouTube Music feito com Tarve",
-    "publisher": "omarcosr",
     "icon": "assets/icon.png",
     "installer": {
       "directory": "YouTubeMusic",

@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.key
 .DS_Store
+go/parity/.cache/
+go/*.exe
+go/release/
