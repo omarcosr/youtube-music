@@ -1,4 +1,4 @@
-// Builds every Windows download of a release into dist/github, with the signed manifests the apps
+// Builds every Windows download of a release (installer and portable .exe) into dist/github, with the signed manifests the apps
 // update from: the TypeScript app on txiki.js, Bun and Node.js (`tarve build --packs` + `tarve pack`:
 // a new version reaches them as a small app pack) and the Go app (the whole executable).
 //
@@ -58,7 +58,16 @@ function release(flavor: string, exe: string, pack?: string): void {
     copyFileSync(join(updates, decodeURIComponent(artifact.url)), join(out, asset));
     artifact.url = base + asset;
   };
-  for (const [os, artifact] of Object.entries<Artifact>(manifest.platforms)) rename(artifact, `YouTubeMusic-${flavor}-${os}.exe`);
+  for (const [os, artifact] of Object.entries<Artifact>(manifest.platforms)) {
+    rename(artifact, `YouTubeMusic-${flavor}-${os}.exe`);
+    // The Windows installer (tarve package --format setup): per user, Start menu, Apps & features, uninstaller.
+    // Its wizard runs on txiki.js whatever the app's runtime (~20 MB instead of ~100 MB on Bun).
+    const setup = join(build, flavor, "setup");
+    run(["bunx", "tarve", "package", exe, "--format", "setup", "--runtime", "txiki", "--entry", "src/youtube-music.tsx", "--out", setup]);
+    const [installer] = [...new Bun.Glob("*.exe").scanSync(setup)];
+    if (!installer) throw new Error(`no installer in ${setup}`);
+    copyFileSync(join(setup, installer), join(out, `YouTubeMusic-${flavor}-setup-${os}.exe`));
+  }
   for (const [os, runtimes] of Object.entries<Record<string, Artifact>>(manifest.packs ?? {})) {
     for (const [runtime, artifact] of Object.entries(runtimes)) rename(artifact, `YouTubeMusic-${runtime}-${os}.tarve`);
   }
@@ -94,9 +103,16 @@ release("go", goExe);
 
 console.log(`\n${out}`);
 if (publish) {
-  // A draft until every file is there: apps follow releases/latest, which skips drafts.
   const files = (ext: string) => [...new Bun.Glob(`*${ext}`).scanSync(out)].map(file => join(out, file));
-  run(["gh", "release", "create", tag, "--repo", repo, "--draft", "--title", `${name} ${version}`, "--generate-notes", ...files(".exe"), ...files(".tarve")]);
-  run(["gh", "release", "upload", tag, "--repo", repo, ...files(".json")]);
-  run(["gh", "release", "edit", tag, "--repo", repo, "--draft=false", "--latest"]);
+  const exists = Bun.spawnSync(["gh", "release", "view", tag, "--repo", repo], { env, stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+  if (exists) {
+    // Rebuilding a published release: replace its files, the manifests last.
+    run(["gh", "release", "upload", tag, "--repo", repo, "--clobber", ...files(".exe"), ...files(".tarve")]);
+    run(["gh", "release", "upload", tag, "--repo", repo, "--clobber", ...files(".json")]);
+  } else {
+    // A draft until every file is there: apps follow releases/latest, which skips drafts.
+    run(["gh", "release", "create", tag, "--repo", repo, "--draft", "--title", `${name} ${version}`, "--generate-notes", ...files(".exe"), ...files(".tarve")]);
+    run(["gh", "release", "upload", tag, "--repo", repo, ...files(".json")]);
+    run(["gh", "release", "edit", tag, "--repo", repo, "--draft=false", "--latest"]);
+  }
 }

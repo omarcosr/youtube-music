@@ -24,14 +24,16 @@ Nome, ícone, AppUserModelID (`YouTubeMusic.Desktop`) e opções do instalador f
 
 ## Downloads
 
-Cada [release](https://github.com/omarcosr/youtube-music/releases/latest) traz um `.exe` portátil por versão:
+Cada [release](https://github.com/omarcosr/youtube-music/releases/latest) traz, para cada versão, um instalador (por usuário, em `%LOCALAPPDATA%\Programs\YouTubeMusic`, com atalhos e desinstalador) e um `.exe` portátil:
 
-| Arquivo | App |
-| --- | --- |
-| `YouTubeMusic-txiki-win32-x64.exe` | TypeScript no txiki.js (o menor) |
-| `YouTubeMusic-bun-win32-x64.exe` | TypeScript no Bun |
-| `YouTubeMusic-node-win32-x64.exe` | TypeScript no Node.js |
-| `YouTubeMusic-go-win32-x64.exe` | Go |
+| App | Instalador | Portátil |
+| --- | --- | --- |
+| TypeScript no txiki.js (o menor) | `YouTubeMusic-txiki-setup-win32-x64.exe` | `YouTubeMusic-txiki-win32-x64.exe` |
+| TypeScript no Bun | `YouTubeMusic-bun-setup-win32-x64.exe` | `YouTubeMusic-bun-win32-x64.exe` |
+| TypeScript no Node.js | `YouTubeMusic-node-setup-win32-x64.exe` | `YouTubeMusic-node-win32-x64.exe` |
+| Go | `YouTubeMusic-go-setup-win32-x64.exe` | `YouTubeMusic-go-win32-x64.exe` |
+
+As versões instalam na mesma pasta: instalar uma substitui a outra.
 
 ## Atualizações incrementais
 
