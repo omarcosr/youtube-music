@@ -11,6 +11,7 @@
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { NtExecutable, NtExecutableResource } from "resedit";
 
 const root = resolve(import.meta.dir, "..");
 const repo = "omarcosr/youtube-music";
@@ -99,6 +100,17 @@ copyFileSync(native, join(embedded, "tarve_native"));
 copyFileSync(join(root, "assets/icon.png"), join(embedded, "icon.png"));
 const goExe = join(build, "go", "YouTubeMusic.exe");
 run(["go", "build", "-tags", "release", "-trimpath", "-ldflags", `-H windowsgui -s -w -X main.version=${version}`, "-o", goExe, "."], goDir);
+// go build writes no Windows resources: give the executable the icon (Explorer, shortcuts, Apps &
+// features) and version details tarve build put in the txiki.js one.
+const branded = NtExecutable.from(readFileSync(goExe), { ignoreCert: true });
+const resources = NtExecutableResource.from(branded);
+const RT_ICON = 3, RT_GROUP_ICON = 14, RT_VERSION = 16;
+const from = NtExecutableResource.from(NtExecutable.from(readFileSync(join(build, "txiki", "YouTubeMusic.exe")), { ignoreCert: true }));
+const copied = from.entries.filter(entry => [RT_ICON, RT_GROUP_ICON, RT_VERSION].includes(entry.type as number));
+if (!copied.some(entry => entry.type === RT_GROUP_ICON)) throw new Error("the txiki.js build has no icon to copy");
+resources.entries = resources.entries.filter(entry => ![RT_ICON, RT_GROUP_ICON, RT_VERSION].includes(entry.type as number)).concat(copied);
+resources.outputResource(branded);
+writeFileSync(goExe, Buffer.from(branded.generate()));
 release("go", goExe);
 
 console.log(`\n${out}`);
