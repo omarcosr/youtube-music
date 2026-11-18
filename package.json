@@ -1,0 +1,50 @@
+{
+  "name": "youtube-music",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "module": "src/youtube-music.tsx",
+  "scripts": {
+    "start": "bunx tarve run src/youtube-music.tsx",
+    "dev": "bunx tarve dev src/youtube-music.tsx",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bunx tarve build src/youtube-music.tsx --runtime txiki --outfile dist/YouTubeMusic.exe",
+    "build:bun": "bunx tarve build src/youtube-music.tsx --runtime bun --outfile dist/bun/YouTubeMusic.exe",
+    "package": "bun run build && bunx tarve package dist/YouTubeMusic.exe --format setup,zip --out dist/release"
+  },
+  "dependencies": {
+    "@tarve/core": "0.13.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  },
+  "tarve": {
+    "name": "YouTube Music",
+    "appId": "omarcosr.YouTubeMusic",
+    "description": "Cliente do YouTube Music feito com Tarve",
+    "publisher": "omarcosr",
+    "icon": "assets/icon.png",
+    "installer": {
+      "directory": "YouTubeMusic",
+      "shortcutName": "YouTube Music",
+      "languages": [
+        "pt-BR",
+        "en"
+      ],
+      "accent": "#ff0033",
+      "options": {
+        "desktopShortcut": {
+          "enabled": true,
+          "default": true
+        },
+        "launch": {
+          "enabled": true,
+          "default": true,
+          "args": []
+        }
+      }
+    }
+  }
+}
