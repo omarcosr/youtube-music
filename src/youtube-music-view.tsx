@@ -12,6 +12,15 @@ export const clockText = signal(clock(0));
 playTime.subscribe(() => { clockText.value = clock(playTime.value); });
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
+/** The self-update, as the About dialog shows it (youtube-music-updates.ts drives it). */
+export interface UpdateStatus {
+  status: "off" | "idle" | "checking" | "current" | "downloading" | "ready" | "error";
+  /** The newer version, while downloading or ready. */
+  version?: string;
+  /** Download progress, 0 to 1; absent when the size is unknown. */
+  progress?: number;
+  error?: string;
+}
 
 export const state = {
   page: { kind: "home" } as Page,
@@ -61,6 +70,12 @@ export const state = {
   lyricsOffset: 0,
   
   accountOpen: false,
+  /** The About dialog (account menu). */
+  about: false,
+  /** This build's version and what runs it (Go, txiki.js, Bun or Node.js). */
+  appVersion: "",
+  flavor: "",
+  update: { status: "off" } as UpdateStatus,
   /** Size of the now-playing area, so the artwork fits it. */
   stage: null as { width: number; height: number } | null,
   media: (): MediaController | undefined => undefined,
@@ -93,6 +108,9 @@ export const state = {
   /** Playback moved: the synced lyrics follow the line being sung. */
   followLyrics: () => { },
   hide: () => { },
+  checkUpdates: () => { },
+  /** Quits into the downloaded version. */
+  restartToUpdate: () => { },
 };
 
 // YouTube Music's palette: near-black surfaces, one red accent.
@@ -275,17 +293,16 @@ function TopBar() {
         </View>
         <View flex={1} />
         {compact() ? null : <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />}
-        {state.signedIn
-          // Signed in: an avatar; Sign out lives in its menu, out of the way.
-          ? <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
-            items={[{ value: "sign-out", label: "Sign out" }]} onSelect={value => { if (value === "sign-out") state.signOut(); }}
-            trigger={<View style={{ width: 30, height: 30, radius: 15, background: c.selected, align: "center", justify: "center", hover: { background: "#3a3a3a" } }}><Glyph d={icons.user} size={15} color={c.text} /></View>}
+        {/* The account menu: sign in or out, and About (version and updates). */}
+          <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
+          items={state.signedIn ? [{ value: "about", label: "About" }, { value: "sign-out", label: "Sign out" }] : [{ value: "sign-in", label: "Sign in" }, { value: "about", label: "About" }]}
+            onSelect={value => {
+            if (value === "sign-out") state.signOut();
+            else if (value === "about") state.about = true;
+              else if (value === "sign-in") { if (phone) state.signInWithBrowser(); else state.signIn = "choose"; }
+            }}
+            trigger={<View style={{ width: 30, height: 30, radius: 15, background: state.signedIn ? c.selected : c.raised, align: "center", justify: "center", hover: { background: "#3a3a3a" } }}><Glyph d={icons.user} size={15} color={state.signedIn ? c.text : c.muted} /></View>}
             contentStyle={{ left: undefined, right: 0, minWidth: 160, background: c.raised, borderColor: c.border }} />
-          : <Pressable id="account" onClick={() => { if (phone) state.signInWithBrowser(); else state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
-            style={{ height: 30, padding: { left: 10, right: 12 }, gap: 6, direction: "row", align: "center", radius: 15, cursor: "pointer", background: c.raised, hover: { background: c.selected } }}>
-            <Glyph d={icons.user} size={14} color={c.muted} />
-            <Text size={12} color={c.text} style={{ whiteSpace: "nowrap" }}>Sign in</Text>
-          </Pressable>}
       </Row>
     </TitleBar>
   );
@@ -679,9 +696,8 @@ function PlayerBar() {
   );
 }
 
-function SignInDialog() {
-  if (state.signIn === "closed") return null;
-  const button = (id: string, label: string, onClick: () => void, primary = false) => (
+function dialogButton(id: string, label: string, onClick: () => void, primary = false) {
+  return (
     <Pressable id={id} onClick={onClick} control={{ role: "button", label }}
       style={{
         height: 34, padding: { left: 16, right: 16 }, radius: 8, align: "center", justify: "center", cursor: "pointer",
@@ -690,6 +706,46 @@ function SignInDialog() {
       <Text size={13} weight={600} color={primary ? c.accentInk : c.text}>{label}</Text>
     </Pressable>
   );
+}
+
+function updateText(update: UpdateStatus): string {
+  switch (update.status) {
+    case "checking": return "Checking for updates…";
+    case "current": return "You're up to date.";
+    case "downloading": return `Downloading version ${update.version}…${update.progress === undefined ? "" : ` ${Math.floor(update.progress * 100)}%`}`;
+    case "ready": return `Version ${update.version} is ready. It installs when you quit.`;
+    case "error": return `Couldn't update: ${update.error}`;
+    case "off": return "This copy doesn't update itself.";
+    default: return "Updates are checked on their own every few hours.";
+  }
+}
+
+function AboutDialog() {
+  if (!state.about) return null;
+  const update = state.update;
+  const action = update.status === "ready" ? dialogButton("about-restart", "Restart now", state.restartToUpdate, true)
+    : update.status === "idle" || update.status === "current" || update.status === "error" ? dialogButton("about-check", "Check for updates", state.checkUpdates, true)
+    : null;
+  return (
+    <Modal id="about" open width={420} showClose={false} onOpenChange={open => { if (!open) state.about = false; }}
+      style={{ gap: 14, radius: 14, background: c.panel, borderColor: c.border }}>
+      <Row gap={12} align="center">
+        <View style={{ width: 40, height: 40, radius: 20, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.play} size={18} fill color={c.accentInk} /></View>
+        <Column gap={2}>
+          <Text size={18} weight={700}>YouTube Music</Text>
+          <Text id="about-version" size={13} color={c.muted}>{`Version ${state.appVersion || "dev"} · ${state.flavor}`}</Text>
+        </Column>
+      </Row>
+      <Text id="about-update" size={13} color={update.status === "error" ? "#ff8a8a" : c.text}>{updateText(update)}</Text>
+      <Text size={12} color={c.muted}>github.com/omarcosr/youtube-music · Personal use: YouTube's Terms of Service forbid third-party clients.</Text>
+      <Row gap={8} justify="end">{dialogButton("about-close", "Close", () => { state.about = false; })}{action}</Row>
+    </Modal>
+  );
+}
+
+function SignInDialog() {
+  if (state.signIn === "closed") return null;
+  const button = dialogButton;
   return (
     <Modal id="sign-in" open width={440} showClose={false} closeOnOverlay={false} onOpenChange={open => { if (!open) state.signIn = "closed"; }}
       style={{ gap: 14, radius: 14, background: c.panel, borderColor: c.border }}>
@@ -748,6 +804,7 @@ export function YouTubeMusicView() {
         {compact() ? <><MobilePlayerBar /><MobileNav /></> : <PlayerBar />}
       </Column>
       <SignInDialog />
+      <AboutDialog />
       {state.notice ? <View key={`notice-${state.notice}`} style={{ position: "absolute", left: 16, bottom: compact() ? 136 : 84, padding: { left: 14, right: 14, top: 10, bottom: 10 }, radius: 8, background: "#f1f1f1", boxShadow: "0 8px 24px #00000080", animation: appear, pointerEvents: "none" }}>
         <Text size={13} weight={500} color={c.window}>{state.notice}</Text>
       </View> : null}

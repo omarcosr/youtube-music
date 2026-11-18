@@ -37,7 +37,7 @@ As versões instalam na mesma pasta: instalar uma substitui a outra.
 
 ## Atualizações incrementais
 
-Todas as versões se atualizam sozinhas a partir das releases: verificam o manifesto assinado (`latest-<txiki|bun|node|go>.json`) 15 s após abrir e a cada 6 h, baixam em segundo plano e instalam ao sair (ou na hora, pelo toast ou pela notificação); a nova versão roda na próxima abertura.
+Todas as versões se atualizam sozinhas a partir das releases: verificam o manifesto assinado (`latest-<txiki|bun|node|go>.json`) 15 s após abrir e a cada 6 h, baixam em segundo plano e instalam ao sair (ou na hora, pelo toast ou pela notificação); a nova versão roda na próxima abertura. Em **conta → About** ficam a versão, qual app é (Go, txiki.js, Bun ou Node.js), o estado da atualização (verificando, baixando com progresso, pronta, atualizado ou erro) e os botões "Check for updates" e "Restart now".
 
 - **TypeScript:** os executáveis são gerados com `tarve build --packs` e recebem *app packs* (`tarve pack`, ~160 KB): só o código e os arquivos do app, sem o runtime, assinados com Ed25519 e criptografados. Um pack que falha ao iniciar é descartado e o app volta à versão anterior. Quando a release exige um runtime novo, vem o executável inteiro.
 - **Go:** o mesmo `latest.json` do `tarve release` e a mesma chave (`go/update.go`); como o host Go não roda packs, vem o executável inteiro, verificado (tamanho, SHA-256) e trocado ao sair. O build de release embute a biblioteca nativa e o ícone.

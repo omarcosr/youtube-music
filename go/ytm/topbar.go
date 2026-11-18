@@ -13,23 +13,27 @@ func TopBar() *VNode {
 	if state.ShowQueue {
 		queueLabel = "Hide queue"
 	}
-	var account Child
+	// The account menu: sign in or out, and About (version and updates).
+	items := []DropdownMenuItem{{Value: "sign-in", Label: "Sign in"}, {Value: "about", Label: "About"}}
+	avatar, avatarInk := c.raised, c.muted
 	if state.SignedIn {
-		account = DropdownMenu(Props{"id": "account", "label": "Account", "open": state.AccountOpen, "onOpenChange": func(open bool) { state.AccountOpen = open },
-			"items": []DropdownMenuItem{{Value: "sign-out", Label: "Sign out"}}, "onSelect": func(v string) {
-				if v == "sign-out" {
-					state.SignOut()
-				}
-			},
-			"trigger": View(Props{"style": S{"width": 30, "height": 30, "radius": 15, "background": c.selected, "align": "center", "justify": "center", "hover": S{"background": "#3a3a3a"}}},
-				Glyph(glyph{d: icons.user, size: 15, color: c.text})),
-			"contentStyle": S{"left": nil, "right": 0, "minWidth": 160, "background": c.raised, "borderColor": c.border}})
-	} else {
-		account = Pressable(Props{"id": "account", "onClick": func() { state.SignIn = "choose" }, "control": S{"role": "button", "label": "Sign in"},
-			"style": S{"height": 30, "padding": S{"left": 10, "right": 12}, "gap": 6, "direction": "row", "align": "center", "radius": 15, "cursor": "pointer", "background": c.raised, "hover": S{"background": c.selected}}},
-			Glyph(glyph{d: icons.user, size: 14, color: c.muted}),
-			Text(Props{"size": 12, "color": c.text, "style": S{"whiteSpace": "nowrap"}}, "Sign in"))
+		items = []DropdownMenuItem{{Value: "about", Label: "About"}, {Value: "sign-out", Label: "Sign out"}}
+		avatar, avatarInk = c.selected, c.text
 	}
+	account := DropdownMenu(Props{"id": "account", "label": "Account", "open": state.AccountOpen, "onOpenChange": func(open bool) { state.AccountOpen = open },
+		"items": items, "onSelect": func(v string) {
+			switch v {
+			case "sign-out":
+				state.SignOut()
+			case "about":
+				state.About = true
+			case "sign-in":
+				state.SignIn = "choose"
+			}
+		},
+		"trigger": View(Props{"style": S{"width": 30, "height": 30, "radius": 15, "background": avatar, "align": "center", "justify": "center", "hover": S{"background": "#3a3a3a"}}},
+			Glyph(glyph{d: icons.user, size: 15, color: avatarInk})),
+		"contentStyle": S{"left": nil, "right": 0, "minWidth": 160, "background": c.raised, "borderColor": c.border}})
 	brandWidth, brand, queueToggle := any(200), Child(Text(Props{"size": 15, "weight": 700}, "Music")), Child(IconButton(iconButton{id: "toggle-queue", d: icons.queue, label: queueLabel, tip: "bottom", active: state.ShowQueue, onClick: func() { state.ShowQueue = !state.ShowQueue }}))
 	if compact() {
 		brandWidth, brand, queueToggle = nil, nil, nil

@@ -52,6 +52,16 @@ type Lyrics struct {
 	Source string      `json:"source"`
 }
 
+// UpdateStatus is the self-update as the About dialog shows it (main's update.go drives it):
+// off, idle, checking, current, downloading, ready or error.
+type UpdateStatus struct {
+	Status  string `json:"status"`
+	Version string `json:"version,omitempty"`
+	// Progress is the download, 0 to 1; nil when the size is unknown.
+	Progress *float64 `json:"progress,omitempty"`
+	Error    string   `json:"error,omitempty"`
+}
+
 type LyricsEntry struct {
 	ID     string  `json:"id"`
 	Status string  `json:"status"`
@@ -96,7 +106,12 @@ type State struct {
 	Lyrics       *LyricsEntry `json:"lyrics"`
 	LyricsOffset float64      `json:"lyricsOffset"`
 	AccountOpen  bool         `json:"accountOpen"`
-	Stage        *Size        `json:"stage"`
+	// About is the About dialog (account menu); AppVersion and Flavor name this build.
+	About      bool          `json:"about"`
+	AppVersion string        `json:"appVersion"`
+	Flavor     string        `json:"flavor"`
+	Update     *UpdateStatus `json:"update"`
+	Stage      *Size         `json:"stage"`
 	// Shelves loaded (nil and empty differ: nil is "loading").
 	ShelvesLoaded, ResultsLoaded, LibraryLoaded bool `json:"-"`
 
@@ -118,10 +133,12 @@ type State struct {
 	LyricsScrolled                                         func(offset float64, info ScrollInfo)         `json:"-"`
 	FollowLyrics                                           func()                                        `json:"-"`
 	Hide                                                   func()                                        `json:"-"`
+	// CheckUpdates checks now; RestartToUpdate quits into the downloaded version.
+	CheckUpdates, RestartToUpdate func() `json:"-"`
 }
 
 func NewState() *State {
-	s := &State{Page: &Page{Kind: "home"}, Index: -1, SignIn: "closed", Volume: 0.8, Repeat: "off", Autoplay: true}
+	s := &State{Page: &Page{Kind: "home"}, Index: -1, SignIn: "closed", Volume: 0.8, Repeat: "off", Autoplay: true, Update: &UpdateStatus{Status: "off"}}
 	noop := func() {}
 	s.Media = func() *MediaController { return nil }
 	s.Open, s.GoBack, s.Play, s.Jump = func(*Page) {}, noop, func([]*Item, int, string) {}, func(int) {}
@@ -132,6 +149,7 @@ func NewState() *State {
 	s.SignInWithBrowser, s.SavePastedCookies, s.SignOut, s.Refresh = noop, noop, noop, noop
 	s.MediaFailed, s.Played = func(string) {}, noop
 	s.LyricsScrolled, s.FollowLyrics, s.Hide = func(float64, ScrollInfo) {}, noop, noop
+	s.CheckUpdates, s.RestartToUpdate = noop, noop
 	return s
 }
 
@@ -1049,20 +1067,85 @@ func PlayerBar() *VNode {
 				"style":         S{"width": 110, "foreground": c.text}})))
 }
 
+func dialogButton(id, label string, onClick func(), primary bool) *VNode {
+	bg, tc := c.raised, c.text
+	if primary {
+		bg, tc = c.accent, c.accentInk
+	}
+	return Pressable(Props{"id": id, "onClick": onClick, "control": S{"role": "button", "label": label},
+		"style": S{"height": 34, "padding": S{"left": 16, "right": 16}, "radius": 8, "align": "center", "justify": "center", "cursor": "pointer",
+			"background": bg, "hover": S{"opacity": 0.88}}},
+		Text(Props{"size": 13, "weight": 600, "color": tc}, label))
+}
+
+func updateText(u *UpdateStatus) string {
+	switch u.Status {
+	case "checking":
+		return "Checking for updates…"
+	case "current":
+		return "You're up to date."
+	case "downloading":
+		progress := ""
+		if u.Progress != nil {
+			progress = fmt.Sprintf(" %d%%", int(math.Floor(*u.Progress*100)))
+		}
+		return "Downloading version " + u.Version + "…" + progress
+	case "ready":
+		return "Version " + u.Version + " is ready. It installs when you quit."
+	case "error":
+		return "Couldn't update: " + u.Error
+	case "off":
+		return "This copy doesn't update itself."
+	}
+	return "Updates are checked on their own every few hours."
+}
+
+// AboutDialog shows the version, what runs it and the self-update (account menu → About).
+func AboutDialog() Child {
+	if !state.About {
+		return nil
+	}
+	u := state.Update
+	if u == nil {
+		u = &UpdateStatus{Status: "off"}
+	}
+	var action Child
+	switch u.Status {
+	case "ready":
+		action = dialogButton("about-restart", "Restart now", func() { state.RestartToUpdate() }, true)
+	case "idle", "current", "error":
+		action = dialogButton("about-check", "Check for updates", func() { state.CheckUpdates() }, true)
+	}
+	version := state.AppVersion
+	if version == "" {
+		version = "dev"
+	}
+	color := c.text
+	if u.Status == "error" {
+		color = "#ff8a8a"
+	}
+	return Modal(Props{"id": "about", "open": true, "width": 420, "showClose": false,
+		"onOpenChange": func(open bool) {
+			if !open {
+				state.About = false
+			}
+		},
+		"style": S{"gap": 14, "radius": 14, "background": c.panel, "borderColor": c.border}},
+		Row(Props{"gap": 12, "align": "center"},
+			View(Props{"style": S{"width": 40, "height": 40, "radius": 20, "background": c.accent, "align": "center", "justify": "center"}}, Glyph(glyph{d: icons.play, size: 18, fill: true, color: c.accentInk})),
+			Column(Props{"gap": 2},
+				Text(Props{"size": 18, "weight": 700}, "YouTube Music"),
+				Text(Props{"id": "about-version", "size": 13, "color": c.muted}, "Version "+version+" · "+state.Flavor))),
+		Text(Props{"id": "about-update", "size": 13, "color": color}, updateText(u)),
+		Text(Props{"size": 12, "color": c.muted}, "github.com/omarcosr/youtube-music · Personal use: YouTube's Terms of Service forbid third-party clients."),
+		Row(Props{"gap": 8, "justify": "end"}, dialogButton("about-close", "Close", func() { state.About = false }, false), action))
+}
+
 func SignInDialog() Child {
 	if state.SignIn == "closed" {
 		return nil
 	}
-	button := func(id, label string, onClick func(), primary bool) *VNode {
-		bg, tc := c.raised, c.text
-		if primary {
-			bg, tc = c.accent, c.accentInk
-		}
-		return Pressable(Props{"id": id, "onClick": onClick, "control": S{"role": "button", "label": label},
-			"style": S{"height": 34, "padding": S{"left": 16, "right": 16}, "radius": 8, "align": "center", "justify": "center", "cursor": "pointer",
-				"background": bg, "hover": S{"opacity": 0.88}}},
-			Text(Props{"size": 13, "weight": 600, "color": tc}, label))
-	}
+	button := dialogButton
 	closeDialog := func() { state.SignIn = "closed" }
 	var errText Child
 	if state.SignInError != nil {
@@ -1196,6 +1279,7 @@ func YouTubeMusicView() *VNode {
 				queue),
 			player),
 		SignInDialog(),
+		AboutDialog(),
 		notice)
 }
 

@@ -1,10 +1,11 @@
 package main
 
 // Updates as in the TypeScript app (src/youtube-music-updates.ts): the same latest.json format,
-// written by `tarve release` and signed with the key in tarve-update.key, checked against the same
-// Ed25519 public key. The Go host runs no app packs, so a release brings the whole executable:
-// downloaded in the background beside this one, checked (size, SHA-256, executable header), and
-// swapped in when the app quits (or right away from the notification), so playback never stops.
+// written by `tarve release` (scripts/release.ts) and signed with youtube-music-update.key, checked
+// against the same Ed25519 public key. The Go host runs no app packs, so a release brings the whole
+// executable: downloaded in the background beside this one, checked (size, SHA-256, executable
+// header), and swapped in when the app quits (or right away from About or the notification), so
+// playback never stops. About (account menu) shows where it stands.
 
 import (
 	"bytes"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/omarcosr/tarve/go/tarve"
+	"github.com/omarcosr/youtube-music/go/ytm"
 )
 
 // version is set by the release build (-ldflags "-X main.version=1.2.3"); a dev build never updates.
@@ -56,12 +58,27 @@ type updateManifest struct {
 	Platforms map[string]updateArtifact `json:"platforms"`
 }
 
-// updates holds the downloaded executable until it is installed.
-var updates struct {
-	sync.Mutex
+// httpClient fetches the manifest and the executable; tests point it at a local TLS server.
+var httpClient = http.DefaultClient
+
+// updater is the update cycle: a check, a download with progress, then the executable ready
+// beside this one until the app quits (or restarts into it).
+type updater struct {
+	exe       string
+	url       string
+	publicKey string
+	set       func(ytm.UpdateStatus)
+	announce  func(version string)
+
+	mu      sync.Mutex
+	busy    bool
 	file    string
+	ready   string
 	restart bool
 }
+
+// updates is the running app's updater; nil when this copy does not update itself.
+var updates *updater
 
 // updatePlatform is `${process.platform}-${process.arch}`, as tarve release keys artifacts.
 func updatePlatform() string {
@@ -97,13 +114,44 @@ func selfUpdatable() (string, bool) {
 	return exe, true
 }
 
-// watchUpdates checks soon after start and every few hours until the app closes.
+// watchUpdates shows this build in About and checks soon after start and every few hours.
 func watchUpdates(app *tarve.App) {
+	st := ytm.St()
+	set := func(s ytm.UpdateStatus) {
+		app.Post(func() {
+			st.Update = &s
+			st.Refresh()
+		})
+	}
+	app.Post(func() { st.AppVersion, st.Flavor = version, "Go" })
 	exe, ok := selfUpdatable()
 	if !ok {
+		set(ytm.UpdateStatus{Status: "off"})
 		return
 	}
 	os.Remove(exe + ".old")
+	u := &updater{exe: exe, url: updateURL, publicKey: updatePublicKey, set: set, announce: func(next string) {
+		app.Post(func() {
+			// About shows it when open; otherwise a notification says so, once.
+			if st.About {
+				return
+			}
+			app.Notify(fmt.Sprintf("Update %s ready", next), "It installs when you quit. Click to restart now.", func() {
+				st.RestartToUpdate()
+			})
+		})
+	}}
+	updates = u
+	app.Post(func() {
+		st.CheckUpdates = func() { go u.check(true) }
+		st.RestartToUpdate = func() {
+			u.mu.Lock()
+			u.restart = true
+			u.mu.Unlock()
+			app.Close()
+		}
+	})
+	set(ytm.UpdateStatus{Status: "idle"})
 	go func() {
 		<-app.Ready()
 		wait := firstCheck
@@ -114,32 +162,53 @@ func watchUpdates(app *tarve.App) {
 			case <-time.After(wait):
 			}
 			wait = checkEvery
-			next, err := downloadUpdate(exe)
-			if err != nil {
-				log.Printf("update check failed: %v", err)
-				continue
-			}
-			if next != "" {
-				app.Post(func() {
-					app.Notify(fmt.Sprintf("Update %s ready", next), "It installs when you quit. Click to restart now.", func() {
-						updates.Lock()
-						updates.restart = true
-						updates.Unlock()
-						app.Close()
-					})
-				})
-				return
-			}
+			u.check(false)
 		}
 	}()
 }
 
-// downloadUpdate fetches and verifies the manifest and, when it names a newer version for this
-// platform, downloads it next to the executable. It returns that version, or "" when up to date.
-func downloadUpdate(exe string) (string, error) {
+// check fetches and verifies the manifest and, when it names a newer version for this
+// platform, downloads it next to the executable. manual: About's button (no notification).
+func (u *updater) check(manual bool) {
+	u.mu.Lock()
+	if u.busy {
+		u.mu.Unlock()
+		return
+	}
+	if u.ready != "" {
+		u.mu.Unlock()
+		u.set(ytm.UpdateStatus{Status: "ready", Version: u.ready})
+		return
+	}
+	u.busy = true
+	u.mu.Unlock()
+	defer func() {
+		u.mu.Lock()
+		u.busy = false
+		u.mu.Unlock()
+	}()
+	u.set(ytm.UpdateStatus{Status: "checking"})
+	next, err := u.download()
+	switch {
+	case err != nil:
+		// Offline, a release still uploading or a rejected signature: About says so, and the next round tries again.
+		log.Printf("update failed: %v", err)
+		u.set(ytm.UpdateStatus{Status: "error", Error: err.Error()})
+	case next == "":
+		u.set(ytm.UpdateStatus{Status: "current"})
+	default:
+		u.set(ytm.UpdateStatus{Status: "ready", Version: next})
+		if !manual {
+			u.announce(next)
+		}
+	}
+}
+
+// download returns the version it downloaded, or "" when this one is the newest.
+func (u *updater) download() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	body, final, err := fetch(ctx, updateURL, maxManifest)
+	body, final, err := fetch(ctx, u.url, maxManifest, nil)
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +216,7 @@ func downloadUpdate(exe string) (string, error) {
 	if err := json.Unmarshal(body, &signed); err != nil {
 		return "", errors.New("update manifest is not JSON")
 	}
-	key, err := base64.StdEncoding.DecodeString(updatePublicKey)
+	key, err := base64.StdEncoding.DecodeString(u.publicKey)
 	if err != nil || len(key) != ed25519.PublicKeySize {
 		return "", errors.New("bad update public key")
 	}
@@ -173,7 +242,18 @@ func downloadUpdate(exe string) (string, error) {
 	if err != nil || link.Scheme != "https" {
 		return "", fmt.Errorf("update URL must be HTTPS: %s", artifact.URL)
 	}
-	data, _, err := fetch(ctx, link.String(), artifact.Size+1)
+	next := manifest.Version
+	u.set(ytm.UpdateStatus{Status: "downloading", Version: next, Progress: ptr(0)})
+	shown := 0
+	data, _, err := fetch(ctx, link.String(), artifact.Size, func(received int64) {
+		if artifact.Size <= 0 {
+			return
+		}
+		if percent := int(received * 100 / artifact.Size); percent != shown && percent <= 100 {
+			shown = percent
+			u.set(ytm.UpdateStatus{Status: "downloading", Version: next, Progress: ptr(float64(percent) / 100)})
+		}
+	})
 	if err != nil {
 		return "", err
 	}
@@ -184,46 +264,69 @@ func downloadUpdate(exe string) (string, error) {
 	if runtime.GOOS == "windows" && !bytes.HasPrefix(data, []byte("MZ")) {
 		return "", errors.New("downloaded update is not a Windows executable")
 	}
-	file := exe + ".new"
+	file := u.exe + ".new"
 	if err := os.WriteFile(file, data, 0o755); err != nil {
 		return "", err
 	}
-	updates.Lock()
-	updates.file = file
-	updates.Unlock()
-	return manifest.Version, nil
+	u.mu.Lock()
+	u.file, u.ready = file, next
+	u.mu.Unlock()
+	return next, nil
 }
 
-func fetch(ctx context.Context, link string, limit int64) ([]byte, *url.URL, error) {
+func ptr(f float64) *float64 { return &f }
+
+// fetch reads at most limit bytes of link, reporting progress as it goes.
+func fetch(ctx context.Context, link string, limit int64, progress func(received int64)) ([]byte, *url.URL, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("update download failed: HTTP %d", res.StatusCode)
+		return nil, nil, fmt.Errorf("HTTP %d from %s", res.StatusCode, res.Request.URL.Host)
 	}
-	data, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
-	if err == nil && int64(len(data)) > limit {
-		err = errors.New("update download is too large")
+	var data []byte
+	buf := make([]byte, 64<<10)
+	for {
+		n, err := res.Body.Read(buf)
+		data = append(data, buf[:n]...)
+		if int64(len(data)) > limit {
+			return nil, nil, errors.New("update download is too large")
+		}
+		if progress != nil && n > 0 {
+			progress(int64(len(data)))
+		}
+		if err == io.EOF {
+			return data, res.Request.URL, nil
+		}
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return data, res.Request.URL, err
 }
 
 // installUpdate swaps a downloaded executable in (Windows lets a running executable be renamed;
 // the old one is removed on the next start) and, after "Restart now", starts it.
 func installUpdate() {
-	updates.Lock()
-	file, restart := updates.file, updates.restart
-	updates.Unlock()
+	if updates != nil {
+		updates.install()
+	}
+}
+
+func (u *updater) install() {
+	u.mu.Lock()
+	file, restart := u.file, u.restart
+	u.file, u.ready = "", ""
+	u.mu.Unlock()
 	if file == "" {
 		return
 	}
-	exe := strings.TrimSuffix(file, ".new")
+	exe := u.exe
 	os.Remove(exe + ".old")
 	if err := os.Rename(exe, exe+".old"); err != nil {
 		log.Printf("update install failed: %v", err)
