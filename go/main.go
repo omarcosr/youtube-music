@@ -34,14 +34,11 @@ func iconPath() string {
 func main() {
 	// One app per user: closed to the tray, a later launch brings this one back instead of starting
 	// another player with a second media session.
-	second := make(chan struct{}, 1)
-	instance := requestSingleInstance("YouTubeMusic.Desktop", func() {
-		select {
-		case second <- struct{}{}:
-		default:
-		}
-	})
-	if instance == nil {
+	instance, err := tarve.RequestSingleInstance(tarve.SingleInstanceOptions{ID: "YouTubeMusic.Desktop"})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !instance.Primary {
 		return
 	}
 	// A release build carries its native library and icon; a dev build finds them in the repository.
@@ -88,21 +85,12 @@ func main() {
 			})
 		})
 	}()
-	go func() {
-		for {
-			select {
-			case <-second:
-				app.Post(func() { app.Show(); app.Activate() })
-			case <-app.Closed():
-				return
-			}
-		}
-	}()
+	instance.OnSecondInstance(func(tarve.InstanceLaunch) { app.Post(func() { app.Show(); app.Activate() }) })
 	watchUpdates(app)
 	err = app.Run()
 	ytm.SaveSession()
 	// A restarted version (an update) must become the first instance, not hand itself over to this one.
-	instance.release()
+	instance.Release()
 	// A downloaded update replaces this executable now and runs on the next launch.
 	installUpdate()
 	if err != nil {

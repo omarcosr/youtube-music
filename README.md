@@ -49,7 +49,7 @@ bun run release:publish       # e cria a release v<version> com o gh
 ```
 
 - Chave privada: `./youtube-music-update.key` ou `TARVE_UPDATE_PRIVATE_KEY`. A pública fica em `src/youtube-music-updates.ts` e `go/update.go`; o script confere as duas.
-- O script precisa de txiki.js (`tjs` ou `TARVE_TXIKI`), Node.js 26.10+, Go e, para a biblioteca nativa do app Go, Rust com o checkout do Tarve em `../tarve` (ou `TARVE_GO_NATIVE` apontando para uma DLL pronta).
+- O script precisa de txiki.js (`tjs` ou `TARVE_TXIKI`), Node.js 26.10+, Go e o checkout do Tarve em `../tarve` (o `go/go.mod` compila contra ele). O app Go embute a biblioteca nativa do `@tarve/core` (variante `media`); o script confere se o host Go e o pacote usam o mesmo ABI e protocolo (`TARVE_GO_NATIVE` troca a DLL).
 - No GitHub, um push da tag `v<version>` (igual ao `package.json`) roda `.github/workflows/release.yml`, que publica a release; ele precisa do secret `TARVE_UPDATE_PRIVATE_KEY`: `gh secret set TARVE_UPDATE_PRIVATE_KEY --repo omarcosr/youtube-music < youtube-music-update.key`.
 
 ## Versão em Go

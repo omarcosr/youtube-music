@@ -6,8 +6,8 @@
 //   bun scripts/release.ts --publish   also create GitHub release v<version> with gh
 //
 // Needs the update key (TARVE_UPDATE_PRIVATE_KEY or ./youtube-music-update.key), txiki.js (tjs or
-// TARVE_TXIKI), Node.js 26.10+, Go, and for the Go app's native library either TARVE_GO_NATIVE or a
-// Tarve checkout with Rust next to this repository (TARVE_DIR, default ../tarve, as go/go.mod).
+// TARVE_TXIKI), Node.js 26.10+, Go and the Tarve checkout go/go.mod builds against (TARVE_DIR,
+// default ../tarve). The Go app embeds @tarve/core's native library (or TARVE_GO_NATIVE).
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -91,11 +91,16 @@ for (const runtime of ["txiki", "bun", "node"]) {
 const goDir = join(root, "go");
 const embedded = join(goDir, "release");
 mkdirSync(embedded, { recursive: true });
-let native = process.env.TARVE_GO_NATIVE;
-if (!native) {
-  native = join(build, "go", "tarve_native.dll");
-  run(["bun", "scripts/build.ts", "--release", "--outfile", native], resolve(process.env.TARVE_DIR ?? join(root, "..", "tarve")));
+// The Go host and @tarve/core must speak the same native ABI and protocol to share @tarve/core's
+// prebuilt "media" library (net + media, as the txiki.js build picks): no Rust build.
+const tarveDir = resolve(process.env.TARVE_DIR ?? join(root, "..", "tarve"));
+const goHost = readFileSync(join(tarveDir, "go/tarve/app.go"), "utf8");
+const core = readFileSync(join(root, "node_modules/@tarve/core/dist/npm/index.js"), "utf8");
+for (const [go, js] of [["ProtocolVersion", "PROTOCOL_VERSION"], ["NativeABIVersion", "NATIVE_ABI_VERSION"]]) {
+  const a = new RegExp(`${go}\\s*=\\s*(\\d+)`).exec(goHost)?.[1], b = new RegExp(`var ${js} = (\\d+)`).exec(core)?.[1];
+  if (!a || a !== b) throw new Error(`Go host ${go} ${a} does not match @tarve/core ${js} ${b}: update one of them, or set TARVE_GO_NATIVE`);
 }
+const native = process.env.TARVE_GO_NATIVE ?? join(root, "node_modules/@tarve/core/native/win32-x64/variants/media/tarve_native.dll");
 copyFileSync(native, join(embedded, "tarve_native"));
 copyFileSync(join(root, "assets/icon.png"), join(embedded, "icon.png"));
 const goExe = join(build, "go", "YouTubeMusic.exe");
